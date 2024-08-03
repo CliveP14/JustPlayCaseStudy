@@ -1,74 +1,79 @@
 import pandas as pd
-from generic import functions, paths
 import os
 import numpy as np
+from generic import functions, paths
 
-
-def get_files_in_dictionary():
+def get_files_in_dictionary(names, base_path):
     """Extracts files from path and automatically names them based on the prefix to .csv specified in names as key
     elements within the dataframes dictionary"""
-
-    names = ['adspend.csv', 'installs.csv', 'revenue.csv']
-    filepaths = functions.join_filenames(paths.SUBDIRFILES, names)
-    dataframes = {}
-    for filepath in filepaths:
-        key = os.path.splitext(os.path.basename(filepath))[0]
-        dataframes[key] = pd.read_csv(filepath)
+    filepaths = [os.path.join(base_path, name) for name in names]
+    dataframes = {os.path.splitext(os.path.basename(filepath))[0]: pd.read_csv(filepath) for filepath in filepaths}
     return dataframes
 
 
-def aggregate_revenue_at_user_level():
-    """
-    This function takes the dataframe revenues, adjusts the createdAt to be a date
-    (and removes the one row with nonsense data in which the string cannot be parsed into a date),
-    then calculates the revenue per day per user keeping also the country code and platform.
-    This configuration was set up because it is the same aggregation level as the adspend table.
-    :return:
-    """
-    df = dataframes['revenue']
-
-    # Convert createdAt to datetime and remove rows where it can't be parsed
-    df['createdAt'] = pd.to_datetime(df['createdAt'], errors='coerce')  # coerce non-dates into NaT
+def process_revenue_dataframe(df):
+    """Processes the revenue dataframe to clean data and aggregate revenue at user level."""
+    df['createdAt'] = pd.to_datetime(df['createdAt'], errors='coerce')
     df = df.dropna(subset=['createdAt'])
-
-    # Coerce missing countryCode to 'Unknown'
     df['countryCode'] = df['countryCode'].replace('', 'Unknown').fillna('Unknown')
     df['platform'] = df['platform'].replace('', 'Unknown').fillna('Unknown')
-
-    # Extract date from createdAt
     df['date'] = df['createdAt'].dt.date
-
-    # Group by userId, date, countryCode, and platform and sum the amount
     user_revenue = df.groupby(['userId', 'date', 'countryCode', 'platform'])['amount'].sum().reset_index()
-
-    # Rename the amount column to total_revenue
     user_revenue.rename(columns={'amount': 'total_revenue'}, inplace=True)
-
     return user_revenue
 
 
-dataframes = get_files_in_dictionary()
-user_daily_revenue = aggregate_revenue_at_user_level()
-installs = dataframes['installs']
-installs['installedAt'] = pd.to_datetime(installs['installedAt']).dt.date
+def prepare_installs_dataframe(df):
+    """Prepares the installs dataframe by converting dates."""
+    df['installedAt'] = pd.to_datetime(df['installedAt']).dt.date
+    return df
 
 
-revenue_x_installs = pd.merge(left=user_daily_revenue, right=installs, how='outer', on='userId')
-revenue_x_installs['countryCode_x'].fillna('Unknown', inplace=True)
-revenue_x_installs['index'] = revenue_x_installs.apply(functions.create_index, axis=1)
-grouped_revenues = revenue_x_installs.groupby(['installedAt', 'channel', 'index']).agg(
-    installs=('userId', 'count'),
-    installs_revenue=('total_revenue', lambda x: (x > 0).sum()),
-    total_revenue=('total_revenue', 'sum')
-).reset_index()
+def merge_revenue_installs(user_daily_revenue, installs):
+    """Merges the user daily revenue and installs dataframes."""
+    merged_df = pd.merge(left=user_daily_revenue, right=installs, how='outer', on='userId')
+    merged_df['countryCode_x'].fillna('Unknown', inplace=True)
+    return merged_df
 
 
-adspend = dataframes['adspend']
-adspend['index'] = adspend.apply(functions.create_index, axis=1)
-adspend['installs_adjusted'] = np.maximum(adspend['network_installs'], adspend['installs'])
+def create_index_and_group_revenues(merged_df, create_index_func):
+    """Creates index and groups revenues."""
+    merged_df['index'] = merged_df.apply(create_index_func, axis=1)
+    grouped_revenues = merged_df.groupby(['installedAt', 'channel', 'index']).agg(
+        installs=('userId', 'count'),
+        installs_revenue=('total_revenue', lambda x: (x > 0).sum()),
+        total_revenue=('total_revenue', 'sum')
+    ).reset_index()
+    grouped_revenues.rename(columns={'countryCode_x': 'country_code'}, inplace=True)
+    return grouped_revenues
 
-grouped_revenues.rename(columns={'countryCode_x': 'country_code'}, inplace=True)
-adspend_x_revenue = pd.merge(grouped_revenues, adspend,  how='left', on=['index'])
+
+def process_adspend_dataframe(adspend, create_index_func):
+    """Processes the adspend dataframe."""
+    adspend['index'] = adspend.apply(create_index_func, axis=1)
+    adspend['installs_adjusted'] = np.maximum(adspend['network_installs'], adspend['installs'])
+    return adspend
 
 
-total_revenue = grouped_revenues['total_revenue'].sum()
+def merge_adspend_revenue(grouped_revenues, adspend):
+    """Merges grouped revenues with adspend data."""
+    return pd.merge(grouped_revenues, adspend, how='outer', on=['index'])
+
+
+
+base_path = paths.SUBDIRFILES
+filenames = ['adspend.csv', 'installs.csv', 'revenue.csv']
+
+dataframes = get_files_in_dictionary(filenames, base_path)
+
+user_daily_revenue = process_revenue_dataframe(dataframes['revenue'])
+installs = prepare_installs_dataframe(dataframes['installs'])
+merged_revenue_installs = merge_revenue_installs(user_daily_revenue, installs)
+
+grouped_revenues = create_index_and_group_revenues(merged_revenue_installs, functions.create_index)
+adspend = process_adspend_dataframe(dataframes['adspend'], functions.create_index)
+
+adspend_x_revenue = merge_adspend_revenue(grouped_revenues, adspend)
+total_revenue = adspend_x_revenue['total_revenue'].sum()
+total_cost = adspend_x_revenue['cost'].sum()
+
