@@ -99,7 +99,6 @@ def main():
 
     # 8. Push to csv
     revenue_cost.to_csv('revenue_cost.csv')
-
     return revenue_cost
 
 
