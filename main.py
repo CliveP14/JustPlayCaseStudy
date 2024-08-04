@@ -34,6 +34,7 @@ def process_adspend_data(data):
 
 def merge_revenue_and_installs(revenue, installs):
     revenue_x_installs = pd.merge(revenue, installs, how='right', on='userId')
+    revenue_x_installs.to_csv('revenue_x_installs.csv')
     revenue_x_installs_grouped = revenue_x_installs.groupby(['index', 'channel', 'campaign', 'creative']).agg(
         installs=('userId', 'count'),
         users=('userId', 'nunique'),
@@ -58,7 +59,10 @@ def main():
     installs = process_installs_data(dataframes['installs'])
     adspend = process_adspend_data(dataframes['adspend'])
 
-    # 3. Merge revenue with installs. This function also aggregates to the channel, campaign, and creative level.
+    revenue.to_csv('revenue.csv')
+
+    # 3. Merge revenue with installs. This function also aggregates to the channel, campaign, and creative level,
+    # and outputs a csv for the ungrouped data.
     revenue_x_installs = merge_revenue_and_installs(revenue, installs)
 
     # 4. Merge with spend data. This function merges on campaign.
@@ -67,7 +71,7 @@ def main():
     # 5. Since we have a partial day's data, cost is adjusted pro-rata based on installs. This was a made assumption.
     revenue_cost['adjusted_cost'] = revenue_cost['cost'] * (revenue_cost['installs_x'] / revenue_cost['installs_y'])
 
-    # 6. Remove rows where adjusted cost != 0, as these are anomalous. I would be interesting to find out if there's a
+    # 6. Remove rows where adjusted cost != 0, as these are anomalous. It would be interesting to find out if there's a
     # method or algorithm that can be used to impute these in the future. Further, it would be useful to have a separate
     # table that defines how each campaign/creative/channel is costed (aka, per click, revenue sharing, etc.)
     revenue_cost = revenue_cost[revenue_cost['adjusted_cost'] != 0]
