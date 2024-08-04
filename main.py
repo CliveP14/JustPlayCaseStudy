@@ -4,30 +4,30 @@ from generic import functions, paths
 
 
 def get_files_in_dictionary(names, base_path):
-    """Extracts files from path and automatically names them based on the prefix to .csv specified in names as key
-    elements within the dataframes dictionary"""
+    # Extracts files from path and automatically names them based on the prefix to .csv specified in names as key
+    # elements within the dataframes dictionary"""
     filepaths = [os.path.join(base_path, name) for name in names]
     dataframes = {os.path.splitext(os.path.basename(filepath))[0]: pd.read_csv(filepath) for filepath in filepaths}
     return dataframes
 
 
 def process_revenue_data(data):
-    """Converts all dates to date format and coerces non-dates to NaT. Drops any non-date valued rows (1 error)"""
+    # Converts all dates to date format and coerces non-dates to NaT. Drops any non-date valued rows (1 error)"""
     data['createdAt'] = pd.to_datetime(data['createdAt'], errors='coerce')
     data = data.dropna(subset=['createdAt'])
     return data
 
 
 def process_installs_data(data):
-    """This function creates an index that joins campaign, channel and creative into one string. I didn't end up using
-    this for the join, however this would work better if there was more complete data"""
+    # This function creates an index that joins campaign, channel and creative into one string. I didn't end up using
+    # this for the join, however this would work better if there was more complete data"""
     data['index'] = data.apply(functions.create_index, axis=1)
     return data
 
 
 def process_adspend_data(data):
-    """For installs data, I assumed that the max of network_installs and installs was the correct installs total for the
-    day. The function then groups by campaign and computes total cost, install count and click count"""
+    # For installs data, I assumed that the max of network_installs and installs was the correct installs total for the
+    # day. The function then groups by campaign and computes total cost, install count and click count"""
     data['max_value_installs'] = data[['network_installs', 'installs']].max(axis=1)
     data = data.groupby(['campaign']).agg(
         cost=('cost', 'sum'),
@@ -38,15 +38,15 @@ def process_adspend_data(data):
 
 
 def merge_revenue_and_installs(revenue, installs):
-    """Here I joined the revenue table with installs. I did a right join because I wanted to also keep installs that
-    didn't generate any revenue. I'm assuming this is possible in the current business model and a non-revenue install
-    would be a potential KPI (much like in a conversion funnel)
+    # Here I joined the revenue table with installs. I did a right join because I wanted to also keep installs that
+    # didn't generate any revenue. I'm assuming this is possible in the current business model and a non-revenue install
+    # would be a potential KPI (much like in a conversion funnel)
+    #
+    # Then I print this data to csv, as I want this data at a user level for some graphing work later on.
+    #
+    # I also grouped by index, channel, campaign and creative level so I can join with adspend table to compare the
+    # revenue generation with cost.
 
-    Then I print this data to csv, as I want this data at a user level for some graphing work later on.
-
-    I also grouped by index, channel, campaign and creative level so I can join with adspend table to compare the
-    revenue generation with cost.
-    """
     revenue_x_installs = pd.merge(revenue, installs, how='right', on='userId')
     revenue_x_installs.to_csv('revenue_x_installs.csv')
     revenue_x_installs_grouped = revenue_x_installs.groupby(['index', 'channel', 'campaign', 'creative']).agg(
@@ -58,9 +58,9 @@ def merge_revenue_and_installs(revenue, installs):
 
 
 def merge_revenue_adspend(revenue, adspend):
-    """Here I join revenue with adspend. I do a left join as I want to retain any revenue generating campaigns for
-    which there is no adspend cost. In the end I had to join on campaign only because this is the only variable that
-    left me with meaningful data. I am not sure if I am missing some manipulation from my side."""
+    # Here I join revenue with adspend. I do a left join as I want to retain any revenue generating campaigns for
+    # which there is no adspend cost. In the end I had to join on campaign only because this is the only variable that
+    # left me with meaningful data. I am not sure if I am missing some manipulation from my side.
     revenue_cost = pd.merge(revenue, adspend, how='left', on=['campaign'])
     return revenue_cost
 
