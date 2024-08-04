@@ -48,7 +48,7 @@ def merge_revenue_and_installs(revenue, installs):
     # revenue generation with cost.
 
     revenue_x_installs = pd.merge(revenue, installs, how='right', on='userId')
-    revenue_x_installs.to_csv('revenue_x_installs.csv')
+    revenue_x_installs.to_csv('revenue_x_installs.csv', index=False)
     revenue_x_installs_grouped = revenue_x_installs.groupby(['index', 'channel', 'campaign', 'creative']).agg(
         installs=('userId', 'count'),
         users=('userId', 'nunique'),
@@ -76,7 +76,7 @@ def main():
     installs = process_installs_data(dataframes['installs'])
     adspend = process_adspend_data(dataframes['adspend'])
 
-    revenue.to_csv('revenue.csv')
+    revenue.to_csv('revenue.csv', index=False)
 
     # 3. Merge revenue with installs. This function also aggregates to the channel, campaign, and creative level,
     # and outputs a csv for the ungrouped data.
@@ -98,7 +98,7 @@ def main():
     revenue_cost['roi'] = revenue_cost['daily_roi'] * 365
 
     # 8. Push to csv
-    revenue_cost.to_csv('revenue_cost.csv')
+    revenue_cost.to_csv('revenue_cost.csv', index=False)
     return revenue_cost
 
 
