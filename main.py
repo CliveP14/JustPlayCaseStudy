@@ -1,7 +1,7 @@
 import pandas as pd
 import os
-import numpy as np
 from generic import functions, paths
+
 
 def get_files_in_dictionary(names, base_path):
     """Extracts files from path and automatically names them based on the prefix to .csv specified in names as key
@@ -11,69 +11,76 @@ def get_files_in_dictionary(names, base_path):
     return dataframes
 
 
-def process_revenue_dataframe(df):
-    """Processes the revenue dataframe to clean data and aggregate revenue at user level."""
-    df['createdAt'] = pd.to_datetime(df['createdAt'], errors='coerce')
-    df = df.dropna(subset=['createdAt'])
-    df['countryCode'] = df['countryCode'].replace('', 'Unknown').fillna('Unknown')
-    df['platform'] = df['platform'].replace('', 'Unknown').fillna('Unknown')
-    df['date'] = df['createdAt'].dt.date
-    user_revenue = df.groupby(['userId', 'date', 'countryCode', 'platform'])['amount'].sum().reset_index()
-    user_revenue.rename(columns={'amount': 'total_revenue'}, inplace=True)
-    return user_revenue
+def process_revenue_data(data):
+    data['createdAt'] = pd.to_datetime(data['createdAt'], errors='coerce')
+    data = data.dropna(subset=['createdAt'])
+    return data
 
 
-def prepare_installs_dataframe(df):
-    """Prepares the installs dataframe by converting dates."""
-    df['installedAt'] = pd.to_datetime(df['installedAt']).dt.date
-    return df
+def process_installs_data(data):
+    data['index'] = data.apply(functions.create_index, axis=1)
+    return data
 
 
-def merge_revenue_installs(user_daily_revenue, installs):
-    """Merges the user daily revenue and installs dataframes."""
-    merged_df = pd.merge(left=user_daily_revenue, right=installs, how='outer', on='userId')
-    merged_df['countryCode_x'].fillna('Unknown', inplace=True)
-    return merged_df
-
-
-def create_index_and_group_revenues(merged_df, create_index_func):
-    """Creates index and groups revenues."""
-    merged_df['index'] = merged_df.apply(create_index_func, axis=1)
-    grouped_revenues = merged_df.groupby(['installedAt', 'channel', 'index']).agg(
-        installs=('userId', 'count'),
-        installs_revenue=('total_revenue', lambda x: (x > 0).sum()),
-        total_revenue=('total_revenue', 'sum')
+def process_adspend_data(data):
+    data['max_value_installs'] = data[['network_installs', 'installs']].max(axis=1)
+    data = data.groupby(['campaign']).agg(
+        cost=('cost', 'sum'),
+        installs=('max_value_installs', 'sum'),
+        clicks=('network_clicks', 'sum')
     ).reset_index()
-    grouped_revenues.rename(columns={'countryCode_x': 'country_code'}, inplace=True)
-    return grouped_revenues
+    return data
 
 
-def process_adspend_dataframe(adspend, create_index_func):
-    """Processes the adspend dataframe."""
-    adspend['index'] = adspend.apply(create_index_func, axis=1)
-    adspend['installs_adjusted'] = np.maximum(adspend['network_installs'], adspend['installs'])
-    return adspend
+def merge_revenue_and_installs(revenue, installs):
+    revenue_x_installs = pd.merge(revenue, installs, how='right', on='userId')
+    revenue_x_installs_grouped = revenue_x_installs.groupby(['index', 'channel', 'campaign', 'creative']).agg(
+        installs=('userId', 'count'),
+        users=('userId', 'nunique'),
+        revenue=('amount', 'sum')
+    ).reset_index()
+    return revenue_x_installs_grouped
 
 
-def merge_adspend_revenue(grouped_revenues, adspend):
-    """Merges grouped revenues with adspend data."""
-    return pd.merge(grouped_revenues, adspend, how='outer', on=['index'])
+def merge_revenue_adspend(revenue, adspend):
+    revenue_cost = pd.merge(revenue, adspend, how='left', on=['campaign'])
+    return revenue_cost
 
 
+def main():
+    # 1. load all dataframes to a dictionary
+    base_path = paths.SUBDIRFILES
+    filenames = ['adspend.csv', 'installs.csv', 'revenue.csv']
+    dataframes = get_files_in_dictionary(filenames, base_path)
 
-base_path = paths.SUBDIRFILES
-filenames = ['adspend.csv', 'installs.csv', 'revenue.csv']
+    # 2. process each dataframe by removing errors, unwanted rows, etc.
+    revenue = process_revenue_data(dataframes['revenue'])
+    installs = process_installs_data(dataframes['installs'])
+    adspend = process_adspend_data(dataframes['adspend'])
 
-dataframes = get_files_in_dictionary(filenames, base_path)
+    # 3. Merge revenue with installs. This function also aggregates to the channel, campaign, and creative level.
+    revenue_x_installs = merge_revenue_and_installs(revenue, installs)
 
-user_daily_revenue = process_revenue_dataframe(dataframes['revenue'])
-installs = prepare_installs_dataframe(dataframes['installs'])
-merged_revenue_installs = merge_revenue_installs(user_daily_revenue, installs)
+    # 4. Merge with spend data. This function merges on campaign.
+    revenue_cost = merge_revenue_adspend(revenue_x_installs, adspend)
 
-grouped_revenues = create_index_and_group_revenues(merged_revenue_installs, functions.create_index)
-adspend = process_adspend_dataframe(dataframes['adspend'], functions.create_index)
+    # 5. Since we have a partial day's data, cost is adjusted pro-rata based on installs. This was a made assumption.
+    revenue_cost['adjusted_cost'] = revenue_cost['cost'] * (revenue_cost['installs_x'] / revenue_cost['installs_y'])
 
-adspend_x_revenue = merge_adspend_revenue(grouped_revenues, adspend)
-total_revenue = adspend_x_revenue['total_revenue'].sum()
-total_cost = adspend_x_revenue['cost'].sum()
+    # 6. Remove rows where adjusted cost != 0, as these are anomalous. I would be interesting to find out if there's a
+    # method or algorithm that can be used to impute these in the future. Further, it would be useful to have a separate
+    # table that defines how each campaign/creative/channel is costed (aka, per click, revenue sharing, etc.)
+    revenue_cost = revenue_cost[revenue_cost['adjusted_cost'] != 0]
 
+    # 7. Calculate ROI and annualize it
+    revenue_cost['daily_roi'] = revenue_cost['revenue'] / revenue_cost['adjusted_cost']
+    revenue_cost['roi'] = revenue_cost['daily_roi'] * 365
+
+    # 8. Push to csv
+    revenue_cost.to_csv('revenue_cost.csv')
+
+    return revenue_cost
+
+
+if __name__ == "__main__":
+    revenue_cost = main()

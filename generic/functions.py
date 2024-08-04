@@ -15,8 +15,7 @@ def join_filenames(path, names):
 def create_index(row):
     """
     This function takes channel 1, campaign 30, creative 8 and converts it to an index in the format 1-30-8.
-    :param row:
-    :return:
+    I ended up not using this in the end, because the join really didn't give me as much joy as I had hoped :(
     """
     # Extract numbers from the strings
     channel_num = row['channel'].split()[1]
