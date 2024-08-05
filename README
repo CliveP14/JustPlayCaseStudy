@@ -1,0 +1,10 @@
+The main script is found in main.py.
+
+The source data is in sourcefiles folder, including the task requirements.
+The python code is heavily commented, so each decision is explained in comments.
+
+The code is used to generate 3 datasets, of which I ended up using 2 in my looker report.
+These are revenue.csv, revenue_cost.csv, revenue_x_installs.csv.
+
+The looker report can be found in the looker_report folder both as an attached pdf
+and also via link to the looker report itself.
